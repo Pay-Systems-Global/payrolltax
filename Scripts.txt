@@ -1,0 +1,1327 @@
+
+USE TWO
+GO
+
+CREATE ROLE [blue_payroll_tax]
+GO
+
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[UPR10209_audit](
+	[PRCount] [int] NOT NULL,
+	[USERID] [char](15) NOT NULL,
+	[EMPLOYID] [char](15) NOT NULL,
+	[PYRNTYPE] [smallint] NOT NULL,
+	[PYRLRTYP] [smallint] NOT NULL,
+	[TRXNUMBER] [int] NOT NULL,
+	[SEQNUMBR] [int] NOT NULL,
+	[ACTINDX] [int] NOT NULL,
+	[AMNTOPST] [numeric](19, 5) NOT NULL,
+	[CHEKNMBR] [char](21) NOT NULL,
+	[POSTEDDT] [datetime] NOT NULL,
+	[DEPRTMNT] [char](7) NOT NULL,
+	[JOBTITLE] [char](7) NOT NULL,
+	[PAYROLCD] [char](7) NOT NULL,
+	[UPRACTYP] [smallint] NOT NULL,
+	[PYADNMBR] [int] NOT NULL,
+	[DEX_ROW_ID] [int] NOT NULL,
+	[timestamp] [datetime] NOT NULL,
+	[Stage] [varchar](3) NULL
+) ON [PRIMARY]
+
+GO
+
+/****** Object:  Table [dbo].[UPR10209]    Script Date: 10/18/2018 9:21:29 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[UPR10209](
+	[USERID] [char](15) NOT NULL,
+	[EMPLOYID] [char](15) NOT NULL,
+	[PYRNTYPE] [smallint] NOT NULL,
+	[PYRLRTYP] [smallint] NOT NULL,
+	[TRXNUMBER] [int] NOT NULL,
+	[SEQNUMBR] [int] NOT NULL,
+	[ACTINDX] [int] NOT NULL,
+	[AMNTOPST] [numeric](19, 5) NOT NULL,
+	[CHEKNMBR] [char](21) NOT NULL,
+	[POSTEDDT] [datetime] NOT NULL,
+	[DEPRTMNT] [char](7) NOT NULL,
+	[JOBTITLE] [char](7) NOT NULL,
+	[PAYROLCD] [char](7) NOT NULL,
+	[UPRACTYP] [smallint] NOT NULL,
+	[PYADNMBR] [int] NOT NULL,
+	[DEX_ROW_ID] [int] IDENTITY(1,1) NOT NULL,
+ CONSTRAINT [PKUPR10209] PRIMARY KEY NONCLUSTERED 
+(
+	[USERID] ASC,
+	[PYRNTYPE] ASC,
+	[EMPLOYID] ASC,
+	[PYRLRTYP] ASC,
+	[TRXNUMBER] ASC,
+	[SEQNUMBR] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+
+GO
+
+ALTER TABLE [dbo].[UPR10209_audit] ADD  CONSTRAINT [DF_UPR10209_audit_timestamp]  DEFAULT (getdate()) FOR [timestamp]
+GO
+
+ALTER TABLE [dbo].[UPR10209]  WITH CHECK ADD CHECK  ((datepart(hour,[POSTEDDT])=(0) AND datepart(minute,[POSTEDDT])=(0) AND datepart(second,[POSTEDDT])=(0) AND datepart(millisecond,[POSTEDDT])=(0)))
+GO
+
+
+
+
+
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+CREATE View [dbo].[blue_EmployeePayrollTaxSummary]
+as
+WITH TaxHistory(Year, CompanyID, CompanyCode, AuditControlCode, EmployeeID, HireDate, LastWorkDay,
+	RecurringTotal, OneTimeTotal, NonTaxableTotal, ERTaxableWOBenefits, ERTaxableTotal,ERTaxRate, EETax, Paid, StartDate, EndDate, PeriodYTD, MaxPeriods,PayPeriodEndDate,TaxIncluded,
+	CalcSequence)
+
+AS
+(
+SELECT    cpp.Year, e.CompanyID, c.CompanyCode, AuditControlCode, tx.EMPLOYID, h.HireDate, e.LastWorkDay,
+	RecurringTotal = sum(case when isnull(Taxable,0) = 1 and OnetimePayment = 0 then Amount else 0 end),
+	OneTimeTotal = sum(case when isnull(Taxable,0) = 1 and OnetimePayment = 1 then Amount else 0 end),
+	NonTaxableTotal = sum(case when isnull(Taxable,0) = 0 and PayCodeType = 1 then Amount else 0 end),
+	ERTaxableWOBenefits = sum(case when isnull(TaxableER,0) = 1 and PayCodeType = 1 then Amount else 0 end),
+	ERTaxableTotal = sum(case when isnull(TaxableER,0) = 1 then Amount else 0 end),
+	ERTaxRate,
+	EETax = sum(case when isnull(TaxCode,0) = 1 and Paid=1 then Amount else 0 end),
+	Paid, cpp.StartDate, cpp.EndDate, 
+	PeriodYTD, 
+	MaxPeriods,tx.PayPeriodEndDate, 
+	TaxIncluded = case when ISNULL(CalcSquence,0)>0 then 1 else max(isnull(Taxcode,0)) end,
+	ISNULL(CalcSquence,0)
+
+FROM    (     
+	SELECT    AuditControlCode='zCurrent', UPR10203.EMPLOYID, PayrollCode = UPR10203.PAYRCORD, Amount = UPR10203.TOTALPAY, Paid = 0, h.PayPeriodEndDate , PayCodeType = 1
+	FROM       UPR10203 
+	INNER JOIN UPR10202 h on h.UserID = UPR10203.USERID and h.EMPLOYID = UPR10203.EMPLOYID
+	INNER JOIN UPR10200 bh on bh.UserID = h.UserID 
+
+	UNION ALL
+
+	SELECT    AuditControlCode='zCurrent', UPR10204.EMPLOYID, PayrollCode = UPR10204.DEDUCTON, Amount = UPR10204.TTLDEDTN, Paid = 0, PayPeriodEndDate , PayCodeType = 2
+	FROM       UPR10204 
+	INNER JOIN UPR10202 h on h.UserID = UPR10204.USERID and h.EMPLOYID = UPR10204.EMPLOYID
+	INNER JOIN UPR10200 bh on bh.UserID = h.UserID 
+	
+	UNION ALL
+
+	SELECT     AuditControlCode='zCurrent', UPR10205.EMPLOYID, PayrollCode = UPR10205.BENEFIT, Amount = UPR10205.TOTLBNFT, Paid = 0, PayPeriodEndDate , PayCodeType = 3
+	FROM         UPR10205 
+	INNER JOIN UPR10202 h on h.UserID = UPR10205.USERID and h.EMPLOYID = UPR10205.EMPLOYID
+	INNER JOIN UPR10200 bh on bh.UserID = h.UserID 
+
+	UNION ALL
+
+	Select tx.AUCTRLCD, tx.EMPLOYID, payrolcd,  UPRTRXAM, Paid = 1, PayPeriodEndDate, tx.PYRLRTYP
+	FROM UPR30300 tx
+	INNER JOIN UPR30100 th ON th.AUCTRLCD = tx.AUCTRLCD AND th.PYADNMBR = tx.PYADNMBR 
+	WHERE VOIDED = 0
+
+) tx
+INNER JOIN PAYDB.dbo.Employee e ON  e.EmployeeID = tx.EMPLOYID
+INNER JOIN PAYDB.dbo.Company c ON   c.CompanyID = e.CompanyID and c.CompanyCode = DB_NAME()
+outer apply (
+	Select OneTimePayment, SpecialType, Taxable, BoxNo, CalcSquence
+	from PAYDB.dbo.CompanyBenefitCodes bc 
+	left outer join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType
+	where tx.PayrollCode = bc.BenefitCode AND c.CompanyID = bc.CompanyId and tx.PayCodeType = 3
+	UNION 
+	Select OneTimePayment, SpecialType, Taxable, BoxNo, CalcSquence
+	from PAYDB.dbo.CompanyPayCodes pc 
+	left outer join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = pc.SpecialType
+	where tx.PayrollCode = pc.PayCode AND c.CompanyID = pc.CompanyID and  tx.PayCodeType = 1
+) bc 
+outer apply (
+	Select TaxableER
+	from PAYDB.dbo.CompanyBenefitCodes bc 
+	left outer join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType
+	where tx.PayrollCode = bc.BenefitCode AND c.CompanyID = bc.CompanyId and tx.PayCodeType = 3
+	UNION 
+	Select TOP(1) TaxableER=1 -- include all 'Based on' Pay Codes when listed
+	from UPR00601 ebc 
+	inner join PAYDB.dbo.CompanyBenefitCodes cbc on cbc.BenefitCode = ebc.BENEFIT and cbc.CompanyID = c.CompanyID
+	inner join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = cbc.SpecialType and bst.ERTaxCode = 1
+	where tx.EMPLOYID = ebc.EMPLOYID and tx.PayrollCode = ebc.BSDONCDE AND  tx.PayCodeType = 1
+	UNION 
+	Select TOP(1) TaxableER=1 -- include all Pay Codes when 'ALL' specified
+	from UPR00400 epc
+	CROSS APPLY (Select TOP(1) BENEFIT from UPR00600 ebc 
+		inner join PAYDB.dbo.CompanyBenefitCodes cbc on cbc.BenefitCode = ebc.BENEFIT and cbc.CompanyID = c.CompanyID
+		inner join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = cbc.SpecialType and bst.ERTaxCode = 1
+		where ebc.EMPLOYID = tx.EMPLOYID and ebc.BSDORCDS = 0 and ebc.BNFTMTHD = 1
+		) ebc
+	where tx.EMPLOYID = epc.EMPLOYID and tx.PayrollCode = epc.PAYRCORD AND  tx.PayCodeType = 1
+
+) bcER
+Outer apply (
+	Select TOP(1) ERTaxRate=BNFPRCNT_1 from UPR00600 ebc 
+	inner join PAYDB.dbo.CompanyBenefitCodes cbc on cbc.BenefitCode = ebc.BENEFIT and cbc.CompanyID = c.CompanyID
+	inner join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = cbc.SpecialType and bst.ERTaxCode = 1
+	where ebc.EMPLOYID = tx.EMPLOYID and ebc.BNFTMTHD = 1
+	ORDER BY ebc.INACTIVE
+) txrt
+outer apply (
+	Select TaxCode 
+		from PAYDB.dbo.CompanyDeductionCodes dc 
+	where tx.PayrollCode = dc.DeductionCode AND c.CompanyID = dc.CompanyID and  tx.PayCodeType in (2,5)
+	and TaxCode = 1
+	union
+	Select TaxCode = 1
+	from PAYDB.dbo.CompanyBenefitCodes bc 
+	left outer join PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType
+	where tx.PayrollCode = bc.BenefitCode AND c.CompanyID = bc.CompanyId and tx.PayCodeType = 3
+	--and bc.SpecialType LIKE 'BPTX%^[R]'
+	and bst.EETaxCode = 1
+) ptax
+
+outer apply (
+	select TOP(1) tp.Year,StartDate, EndDate, CurrentPeriodNo = PeriodNo
+	from PAYDB.dbo.TaxPayPeriods tp
+	where (tx.PayPeriodEndDate between StartDate and EndDate OR e.LastWorkDay between StartDate and EndDate)
+	and e.Frequency = tp.Frequency
+	and tp.CompanyId = c.CompanyID
+	ORDER BY tp.EndDate ASC
+) cpp
+
+outer apply (
+		select StartDate = MIN(tp.StartDate), StartPeriodNo = MIN(PeriodNo)
+		from PAYDB.dbo.TaxPayPeriods tp 
+		where tp.year = cpp.year 
+		and e.Frequency = tp.Frequency 
+		and e.HireDate <= tp.EndDate  
+		and tp.CompanyId = c.CompanyID
+		and tp.EndDate >= '2017-07-01' -- July 1st start date --
+
+) spp
+
+outer apply (Select HireDate = case when e.HIreDate < spp.StartDate then spp.StartDate else e.HIreDate end) h
+
+cross apply (
+	Select LastPeriodNo = 
+		--case when e.LastWorkDay between cpp.StartDate and cpp.EndDate 
+		--then CurrentPeriodNo
+		--else
+		 (select count(PeriodNo) 
+			from PAYDB.dbo.TaxPayPeriods tp 
+			where tp.year = cpp.year 
+			and e.Frequency = tp.Frequency
+			and tp.CompanyId = c.CompanyID)
+		--end 
+
+) lpp -- last pay period
+
+outer apply (
+
+	Select	PeriodYTD = case when CurrentPeriodNo < StartPeriodNo then 0 
+							when e.LastWorkDay between cpp.StartDate and cpp.EndDate then 
+								case e.Frequency 
+									when 'W' then (DATEDIFF(DD,h.HireDate,e.LastWorkDay)+1)/7.00
+									when 'BW' then (DATEDIFF(DD,h.HireDate,e.LastWorkDay)+1)/14.00
+									when 'SM' then (dbo.fn_blue_DATEDIFF360(h.HireDate,e.LastWorkDay,0)+1)/15.00
+									when 'M' then (dbo.fn_blue_DATEDIFF360(h.HireDate,DATEADD(DD,1,e.LastWorkDay),0))/30.00
+									else 0
+								end
+							when e.HIreDate > spp.StartDate then 
+								case e.Frequency 
+									when 'W' then (DATEDIFF(DD,h.HireDate,cpp.EndDate))/7.00
+									when 'BW' then (DATEDIFF(DD,h.HireDate,cpp.EndDate)+1)/14.00
+									when 'SM' then (dbo.fn_blue_DATEDIFF360(h.HireDate,DATEADD(DD,1,cpp.EndDate),0))/15.00
+									when 'M' then (dbo.fn_blue_DATEDIFF360(h.HireDate,DATEADD(DD,1,cpp.EndDate),0))/30.00
+									else 0
+								end
+							else CurrentPeriodNo - StartPeriodNo + 1.00 end, 
+			MaxPeriods = case when LastPeriodNo < StartPeriodNo then 0 
+						--when LastPeriodNo = CurrentPeriodNo and e.Contractor = 0 then LastPeriodNo -  StartPeriodNo + 1 -- "True-down" to only worked hours for non-contractors on termination
+						else LastPeriodNo end
+) ppc
+
+Where cpp.Year is not null  
+group by  cpp.Year, e.CompanyID, c.CompanyCode, tx.EMPLOYID,  h.HireDate, e.LastWorkDay, tx.AuditControlCode,ERTaxRate, cpp.StartDate, cpp.EndDate, PeriodYTD, MaxPeriods, tx.PayPeriodEndDate, tx.Paid, ISNULL(CalcSquence,0)
+
+
+)
+
+Select TOP 100 PERCENT * , 
+RecurringYTD = SUM(case when PeriodYTD = 0 then 0 else RecurringTotal end ) OVER  ( PARTITION BY Year, EmployeeID ORDER BY PeriodYTD, AuditControlCode, CalcSequence ROWS UNBOUNDED PRECEDING ),
+OneTimeYTD = SUM(case when PeriodYTD = 0 then 0 else OneTimeTotal end ) OVER  ( PARTITION BY Year, EmployeeID ORDER BY PeriodYTD, AuditControlCode, CalcSequence ROWS UNBOUNDED PRECEDING ),
+EETaxYTD = SUM(case when PeriodYTD = 0 then 0 else EETax end) OVER  ( PARTITION BY Year, EmployeeID ORDER BY PeriodYTD, AuditControlCode, CalcSequence ROWS UNBOUNDED PRECEDING ),
+NonTaxableYTD = SUM(case when PeriodYTD = 0 then 0 else NonTaxableTotal end ) OVER  ( PARTITION BY Year, EmployeeID ORDER BY PeriodYTD, AuditControlCode, CalcSequence ROWS UNBOUNDED PRECEDING )
+
+from TaxHistory
+WHERE PayPeriodEndDate >= '2017-04-01' -- ignore all payrolls prior to 2017 --
+and PayPeriodEndDate >=  HireDate
+and OneTimeTotal + RecurringTotal <>0
+order by EmployeeID, StartDate , AuditControlCode
+
+
+
+
+GO
+
+
+
+
+CREATE View [dbo].[blue_EmployeePayrollTaxTrueUp]
+as
+Select Year, CompanyID, CompanyCode, AuditControlCode, EmployeeID, HireDate, LastWorkDay,
+	RecurringTotal,	OneTimeTotal, NonTaxableTotal, ERTaxableWOBenefits, ERTaxableTotal, ERTaxRate, 
+	ERTaxWOB= ISNULL(ERTaxableWOBenefits,0)*ISNULL(ERTaxRate,0)/100.0, ERTax= ISNULL(ERTaxableTotal,0)*ISNULL(ERTaxRate,0)/100.0,
+	EETax,  Paid, StartDate, EndDate, PeriodYTD, MaxPeriods, PayPeriodEndDate, 
+	RecurringYTD , OneTimeYTD, NonTaxableYTD, EETaxYTD,
+
+	Ann.RecurringAnnual, Ann.OneTimeAnnual ,
+	
+	TaxDueYTD = case when ISNULL(s.TaxIncluded,0) = 1 then  
+						convert(numeric(9,2),case when s.PeriodYTD = 0 or MaxPeriods = 0 then 0 
+						else otAnnTax.AnnTaxAmount - recAnnTax.AnnTaxAmount/MaxPeriods*(MaxPeriods-PeriodYTD) end)
+				else 0 end,
+	TrueUp = case when ISNULL(s.TaxIncluded,0) = 1 then  
+					convert(numeric(9,2),case when s.PeriodYTD = 0 or MaxPeriods = 0 then 0 
+						else otAnnTax.AnnTaxAmount - recAnnTax.AnnTaxAmount/MaxPeriods*(MaxPeriods-PeriodYTD) - EETaxYTD end)
+				else 0 end,
+	s.CalcSequence
+
+from blue_EmployeePayrollTaxSummary s
+outer apply (
+	Select RecurringAnnual = case when s.PeriodYTD = 0 then 0 else s.RecurringYTD/s.PeriodYTD*MaxPeriods end,
+		OneTimeAnnual = case when s.PeriodYTD = 0 then 0 else (s.RecurringYTD)/s.PeriodYTD*MaxPeriods + +s.OneTimeYTD end
+
+) Ann
+
+outer apply PAYDB.dbo.fn_CalcAnnualTax(OneTimeAnnual,s.Year) otAnnTax
+outer apply PAYDB.dbo.fn_CalcAnnualTax(RecurringAnnual, s.Year) recAnnTax
+
+
+
+
+GO
+
+/****** Object:  View [dbo].[blue_EmployeeTaxSummaryByQtr]    Script Date: 10/18/2018 9:20:30 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE ViEW [dbo].[blue_EmployeeTaxSummaryByQtr]
+AS
+Select * 
+From (
+	select  Year,TaxQtr, EmployeeID, GrossEarnings = SUM(RecurringTotal+OneTimeTotal), EETaxWithheld = SUM(EETax),
+		RecurringYTD = MAX(RecurringYTD), OneTimeYTD=MAX(OneTimeYTD), 
+		AnnualizedGE= case when MAX(PeriodYTD)= 0 then 0 else MAX(RecurringYTD)/MAX(PeriodYTD)* MAX(MaxPeriods)+MAX(OneTimeYTD) end, 
+		PeriodYTD = MAX(PeriodYTD), MaxPeriods=MAX(MaxPeriods), TaxDue = SUM(EETax) - MAX(QE.EETaxYTD) + MAX(QE.TaxDueYTD)
+	from [dbo].[blue_EmployeePayrollTaxTrueUp] s
+	outer apply (
+		Select TaxQtr =  case when (MONTH(PayPeriodEndDate)-1)/3 = 0 then 4 else (MONTH(PayPeriodEndDate)-1)/3 end
+	) qtr
+	outer apply (
+		select LastPayroll = MAX(tu.AuditControlCode)
+		from blue_EmployeePayrollTaxSummary tu
+		where tu.EmployeeID = s.EmployeeID
+		and Taxqtr= case when (MONTH(tu.PayPeriodEndDate)-1)/3 = 0 then 4 else (MONTH(tu.PayPeriodEndDate)-1)/3 end
+	) lp
+	outer apply (
+		Select EETaxYTD = case when s.AuditControlCode = LastPayroll then EETaxYTD else -90000 end , 
+				TaxDueYTD = case when s.AuditControlCode = LastPayroll then TaxDueYTD else -90000 end
+	) QE
+
+	group by Year,TaxQtr, EmployeeID
+) s
+outer apply (
+	Select EmployeeName = RTRIM(LASTNAME)+', '+RTRIM(FRSTNAME)
+	from UPR00100
+	where EMPLOYID = EmployeeID
+) e
+outer apply (
+	Select Band = MAX(BandName) 
+	from PAYDB..TaxBands 
+	Where AnnualizedGE >= BandLow 
+
+) bands
+
+
+
+GO
+
+
+CREATE VIEW [dbo].[blue_PayrollTaxCalculator]
+as
+ 	
+	
+SELECT        e.*, RTRIM(e.FRSTNAME) + ' ' + RTRIM(e.MIDLNAME) + ' ' + RTRIM(e.LASTNAME) 
+                         AS EmployeeName, t.Year, t.CompanyID, t.CompanyCode, t.AuditControlCode, t.EmployeeID, t.HireDate, t.LastWorkDay, t.RecurringTotal, t.OneTimeTotal, t.EETax, t.Paid, t.StartDate, t.EndDate, t.PeriodYTD, 
+                         t.MaxPeriods, t.PayPeriodEndDate, t.RecurringYTD, t.OneTimeYTD, t.EETaxYTD as [Tax Withheld YTD], t.RecurringAnnual, t.OneTimeAnnual, t.TaxDueYTD, t.TrueUp as [EE Tax/True Up], [Eff. Tax %] = case when (t.RecurringTotal + t.OneTimeTotal)>1 then t.TrueUp/(t.RecurringTotal + t.OneTimeTotal)*100 else 0.00 end
+FROM            UPR10202 AS lt INNER JOIN
+                         UPR10200 AS b ON lt.USERID = b.USERID INNER JOIN
+                         UPR00100 AS e ON lt.EMPLOYID = e.EMPLOYID INNER JOIN
+                         blue_EmployeePayrollTaxTrueUp AS t ON t.EmployeeID = lt.EMPLOYID AND t.Paid = 0
+
+GO
+
+/****** Object:  View [dbo].[blue_ptax_PayCodes]    Script Date: 10/18/2018 9:20:30 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+CREATE view [dbo].[blue_ptax_PayCodes]
+as
+Select codes.*, 
+	[Special Type]=st.BenefitSpecialTypeDesc, 
+	[ER Tax Code] = case when st.ERTaxCode = 1 then 'Yes' ELSE 'No' end, 
+	[EE Tax Code] = case when st.EETaxCode = 1 then 'Yes' ELSE 'No' end, 
+	[EE Tax Ratio] = case when st.EETaxRatio  = 0 then '' ELSE rtrim(st.EETaxRatio)+'%' end
+from (
+Select PayRecordType= 'Pay Code', pc.CompanyID, pc.PayCode, pc.PayCodeDesc, pc.SpecialType, 
+		Taxable = case when pc.Taxable = 1 then 'Yes' ELSE 'No' end, OneTimePayment = case when pc.OneTimePayment = 1 then 'Yes' else 'No' end
+from PAYDB..CompanyPayCodes pc
+
+union 
+
+Select PayRecordType= 'Benefit', pc.CompanyId, pc.BenefitCode, pc.BenefitCodeDesc, pc.SpecialType, 
+		Taxable = case when pc.Taxable = 1 then 'Yes' ELSE 'No' end, OneTimePayment = case when pc.OneTimePayment = 1 then 'Yes' else 'No' end
+from PAYDB..CompanyBenefitCodes pc
+
+union 
+
+Select PayRecordType= 'Deduction', pc.CompanyId, pc.DeductionCode, pc.DeductionCodeDesc, pc.SpecialType, 
+		Taxable =  'No' , OneTimePayment = 'No' 
+from PAYDB..CompanyDeductionCodes pc
+
+) codes
+left outer join PAYDB..BenefitSpecialType st on codes.SpecialType = st.BenefitSpecialTypeCode
+where CompanyID in (Select CompanyID from PAYDB.dbo.Company c where  c.CompanyCode = DB_NAME()) 
+
+GO
+
+/****** Object:  View [dbo].[blue_CompanyTaxInfo]    Script Date: 10/18/2018 9:20:30 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE VIEW [dbo].[blue_CompanyTaxInfo]
+as
+
+SELECT	c.CompanyID, c.CompanyCode, c.LegalName, c.TaxID, c.TaxPayerClassID, c.TaxPayerRate, c.Active, 
+		tc.Year, tc.TaxYearStart, TaxYearEnd = DATEADD(DD,-1,DATEADD(YY,1,tc.TaxYearStart)),  
+		tc.TaxYearStartW, tc.TaxYearStartBW, tc.TaxYearStartSM, 
+        tc.TaxCap
+FROM	PAYDB.dbo.Company AS c 
+INNER JOIN	PAYDB.dbo.TaxYearConfig AS tc ON c.CompanyID = tc.CompanyId
+WHERE        (c.CompanyCode = DB_NAME())
+
+
+
+GO
+
+/****** Object:  View [dbo].[blue_payroll_GL_Summary]    Script Date: 10/18/2018 9:20:30 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE view [dbo].[blue_payroll_GL_Summary]
+as
+select h.AUCTRLCD AS 'Audit Control Code',
+	h.POSTEDDT AS 'Posted Date', 
+	h.USWHPSTD AS 'User Who Posted',
+	d.ACTINDX AS 'Account Index',  
+	gl.ACTNUMST AS 'Account Number String',
+	gd.ACTDESCR AS 'Account Description',
+	Debit AS 'Debit Amount',
+	Credit AS 'Credit Amount'
+from UPR30400 h
+cross apply (
+	Select Debit = SUM(DEBITAMT),
+			Credit = SUM(CRDTAMNT),
+			ACTINDX
+	from UPR30401 d 
+	where d.AUCTRLCD = h.AUCTRLCD 
+	GROUP BY AUCTRLCD, ACTINDX
+
+) d
+INNER JOIN GL00105 gl on gl.ACTINDX = d.ACTINDX
+INNER JOIN GL00100 gd on gd.ACTINDX = d.ACTINDX
+
+
+GO
+
+
+
+
+-- =============================================
+-- Author:		E. Greaves
+-- Create date: 2017-07-14
+-- Description:	Return available payrolls
+-- =============================================
+CREATE VIEW [dbo].[blue_PayrollList] 
+
+AS
+
+
+	Select Code='zCURRENT', PayLabel =  'CURRENT PAY - '+CONVERT(varchar(12), getdate())
+	UNION
+	Select DISTINCT TOP 100 PERCENT   Code=rtrim(AUCTRLCD), PayLabel = RTRIM(AUCTRLCD) +' - '+ CONVERT(varchar(12),th.CHEKDATE )
+	from UPR30100 th
+	where AUCTRLCD like 'UPRCC%'
+	order by Code DESC
+
+
+
+
+GO
+
+
+
+
+
+CREATE VIEW [dbo].[blue_EmployeePayrollHistory]
+AS
+SELECT     AuditCtrlCode='zCURRENT', UPR10203.EMPLOYID, PayrollCode = UPR10203.PAYRCORD,  PYRLRTYP=1, UPR10203.TOTALPAY, Paid = 0, ChekDate = getdate(), UNTSTOPY
+FROM         UPR10203 
+UNION ALL
+SELECT     AuditCtrlCode='zCURRENT',UPR10204.EMPLOYID, PayrollCode = UPR10204.DEDUCTON, PYRLRTYP=2, UPR10204.TTLDEDTN, Paid = 0, ChekDate = getdate(), UPR10204.VARDBAMT
+FROM         UPR10204 
+UNION ALL
+SELECT     AuditCtrlCode='zCURRENT',UPR10205.EMPLOYID, PayrollCode = UPR10205.BENEFIT, PYRLRTYP=3, UPR10205.TOTLBNFT, Paid = 0, ChekDate = getdate(), 0.0
+FROM         UPR10205 
+UNION ALL
+SELECT     AuditCtrlCode='zCURRENT',UPR10207.EMPLOYID, PayrollCode = UPR10207.LOCALTAX, PYRLRTYP=5, UPR10207.TTLLCLTX, Paid = 0, ChekDate = getdate(), 0.0
+FROM         UPR10207 
+
+UNION ALL
+SELECT     AuditCtrlCode=UPR30100.AUCTRLCD,UPR30300.EMPLOYID, payrolcd, PYRLRTYP, UPRTRXAM, Paid = 1, UPR30300.ChekDate, UPR30300.UNTSTOPY
+FROM         UPR30300 INNER JOIN
+                      UPR30100 ON UPR30100.AUCTRLCD = UPR30300.AUCTRLCD AND UPR30100.PYADNMBR = UPR30300.PYADNMBR 
+WHERE     UPR30100.VOIDED = 0
+
+
+
+
+GO
+
+
+
+
+
+
+/*
+**************************
+Functions
+**************************
+*/
+
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE FUNCTION [dbo].[fn_blue_StringToTable] (  
+	@String VARCHAR(max),   
+	@Delimeter char(1),     
+	@TrimSpace bit )      
+RETURNS @Table TABLE ( [Val] VARCHAR(4000) ) 
+AS 
+BEGIN  
+	DECLARE @Val    VARCHAR(4000)  
+	WHILE LEN(@String) > 0  
+	BEGIN  
+		SET @Val    = LEFT(@String,  ISNULL(NULLIF(CHARINDEX(@Delimeter, @String) - 1, -1),  LEN(@String)))  
+		SET @String = SUBSTRING(@String,  ISNULL(NULLIF(CHARINDEX(@Delimeter, @String), 0),  LEN(@String)) + 1, LEN(@String))  
+		IF @TrimSpace = 1 
+			Set @Val = LTRIM(RTRIM(@Val))  
+		
+		INSERT INTO @Table ( [Val] )  VALUES ( @Val )  
+	END  
+	RETURN 
+END  
+
+GO
+
+
+CREATE FUNCTION [dbo].[fn_blue_DATEDIFF360]
+(
+	@source DATETIME,
+	@target DATETIME,
+	@style BIT = 0
+)
+RETURNS INT
+AS
+BEGIN
+	RETURN	CASE @style
+			-- European style
+			WHEN 1 THEN	CASE
+						WHEN DATEPART(DAY, @target) = 31 THEN 30
+						ELSE DATEPART(DAY, @target)
+					END
+					- CASE
+						WHEN DATEPART(DAY, @source) = 31 THEN 30
+						ELSE DATEPART(DAY, @source)
+					END
+			-- US style
+			ELSE	CASE
+					WHEN DATEPART(DAY, @target) = 31 AND DATEPART(DAYOFYEAR, @source) = 60 AND DATEPART(MONTH, @source) = 2 THEN 30
+					WHEN DATEPART(DAY, @target) = 31 AND DATEPART(DAY, @source) < 30 THEN 31
+					WHEN DATEPART(DAY, @target) = 31 THEN 30
+					ELSE DATEPART(DAY, @target)
+				END
+				- CASE
+					WHEN @source = DATEADD(MONTH, DATEDIFF(MONTH, -1, @source), -1) THEN 30
+					ELSE DATEPART(DAY, @source)
+				END
+		END + 30 * DATEDIFF(MONTH, @source, @target)
+END
+
+GO
+
+
+/*
+********************
+Stored Procedures
+********************
+*/
+
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*
+
+**** RESET COMPANY PAYCODES LIST ****
+
+*/
+
+CREATE PROC [dbo].[blue_refresh_ee_pay_config]
+as
+begin
+	INSERT PAYDB.dbo.CompanyPayCodes(CompanyID, PayCode, PayCodeDesc, BoxNo, SpecialType, OneTimePayment, Taxable)
+
+
+	SELECT distinct c.CompanyID, PayCode=PAYRCORD, PayCodeDesc = p.DSCRIPTN, BoxNo='', SpecialType='', OneTimePayment=0, Taxable=1
+	FROM   UPR40600 p
+	CROSS APPLY (
+		SELECT CompanyID from PAYDB.dbo.Company c where c.CompanyCode = DB_NAME()
+	) c
+	OUTER APPLY (
+		Select Duplicate = 1
+		from PAYDB.dbo.CompanyPayCodes dpc
+		Where dpc.CompanyID = c.CompanyID and dpc.PayCode = p.PAYRCORD
+	) dup 
+	where isnull(Duplicate,0) <> 1
+	and p.INACTIVE = 0;
+
+	
+
+	INSERT PAYDB.dbo.CompanyBenefitCodes (CompanyId, BenefitCode, BenefitCodeDesc, BoxNo, SpecialType, OneTimePayment, Taxable)
+
+
+	SELECT distinct c.CompanyID, PayCode=BENEFIT, PayCodeDesc = rtrim(b.DSCRIPTN), BoxNo='', SpecialType='', OneTimePayment=0, Taxable=0
+	FROM       UPR40800 b 
+	CROSS APPLY (
+		SELECT CompanyID from PAYDB.dbo.Company c where c.CompanyCode = DB_NAME()
+	) c
+	OUTER APPLY (
+		Select Duplicate = 1
+		from PAYDB.dbo.CompanyBenefitCodes dpc
+		Where dpc.CompanyID = c.CompanyID and dpc.BenefitCode = b.BENEFIT
+	) dup 
+	where isnull(Duplicate,0) <> 1
+	and b.INACTIVE = 0;
+
+	-- Register new employees
+	INSERT PAYDB.dbo.Employee(EmployeeID, EmployeeName, CompanyID, DOB, HIreDate, LastWorkDay, DataSource, Frequency, Contractor)
+
+	Select RTRIM(EMPLOYID), rtrim(FRSTNAME)+' '+RTRIM(lastname), c.CompanyID, e.BRTHDATE, e.STRTDATE, e.LASTDAYWORKED_I, 0, Frequency='M', Contractor = case when e.EMPLOYMENTTYPE = 1 then 0 else 1 end
+	from UPR00100 e
+	outer apply (Select CompanyID from PAYDB.dbo.Company c where  c.CompanyCode = DB_NAME()) c
+	where e.INACTIVE = 0
+	and e.EMPLOYID NOT IN (Select EmployeeId from PAYDB.dbo.Employee where CompanyId = c.CompanyId)
+	ORDER BY e.EMPLOYID;
+
+	-- update pay frequency of registered employees
+	UPDATE PAYDB.dbo.Employee
+		SET Frequency = f.Frequency
+	FROM PAYDB.dbo.Employee e
+	outer apply (Select CompanyID from PAYDB.dbo.Company c where  c.CompanyCode = DB_NAME()) c
+	outer apply (
+		select top(1) Frequency = 
+			CASE BNFTFREQ 
+				when 1 then 'W'
+				when 2 then 'BW'
+				when 3 then 'SM'
+				when 4 then 'M'
+				else 'M' end  
+		from UPR00600 eb
+		INNER JOIN PAYDB.dbo.CompanyBenefitCodes bc on  bc.CompanyId = c.CompanyID and bc.BenefitCode = eb.BENEFIT and bc.SpecialType = 'BPTXER'
+		where eb.EMPLOYID = e.EmployeeID
+		order by INACTIVE ASC, DEX_ROW_ID DESC
+	) f
+	where e.Frequency <> f.Frequency;
+
+
+	-- Reset Employee's HireDate and LastDay Worked
+	Update PAYDB.dbo.Employee 
+	Set LastWorkDay = ee.LASTDAYWORKED_I,
+		HIreDate = ee.STRTDATE
+	From PAYDB.dbo.Employee  pe
+	CROSS APPLY (
+		SELECT CompanyID from PAYDB.dbo.Company c 
+		where c.CompanyCode = DB_NAME() 
+		and c.CompanyID = pe.CompanyID
+	) c
+	inner join UPR00100 ee on ee.EMPLOYID = pe.EmployeeID
+
+END 
+
+
+
+
+GO
+
+
+
+-- =============================================
+-- Author:		E. Greaves
+-- Create date: 2017-05-17
+-- Description:	
+-- Update : 2017-07-14
+-- =============================================
+CREATE PROCEDURE [dbo].[blue_getHistoryTaxDetailsEE] 
+	-- Add the parameters for the stored procedure here
+	@Employees as varchar(max)
+
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+ 	
+	
+	SELECT e.*,t.*
+	FROM UPR00100 e
+	INNER JOIN blue_EmployeePayrollTaxTrueUp t ON t.EmployeeID = e.EMPLOYID 
+	Where e.EMPLOYID in (Select Val from fn_blue_StringToTable(@Employees,',',1))
+
+
+END
+
+
+
+GO
+
+
+
+CREATE PROC [dbo].[blue_initialize_ee_pay_config]
+as
+begin
+	INSERT PAYDB.dbo.CompanyPayCodes(CompanyID, PayCode, PayCodeDesc, BoxNo, SpecialType, OneTimePayment, Taxable)
+
+
+	SELECT distinct c.CompanyID, PayCode=PAYRCORD, PayCodeDesc = p.DSCRIPTN, BoxNo='', SpecialType='', OneTimePayment=0, Taxable=0
+	FROM   UPR40600 p --on p.PAYRCORD = tx.PAYROLCD
+	CROSS APPLY (
+		SELECT CompanyID from PAYDB.dbo.Company c where c.CompanyCode = DB_NAME()
+	) c
+	OUTER APPLY (
+		Select Duplicate = 1
+		from PAYDB.dbo.CompanyPayCodes dpc
+		Where dpc.CompanyID = c.CompanyID and dpc.PayCode = PAYRCORD
+	) dup 
+	where isnull(Duplicate,0) <> 1;
+
+	
+
+	INSERT PAYDB.dbo.CompanyBenefitCodes (CompanyId, BenefitCode, BenefitCodeDesc, BoxNo, SpecialType, OneTimePayment, Taxable)
+
+
+	SELECT distinct c.CompanyID, PayCode=BENEFIT, PayCodeDesc = rtrim(b.DSCRIPTN), BoxNo='', SpecialType='', OneTimePayment=0, Taxable=0
+	FROM   UPR40800 b --on b.BENEFIT = tx.PAYROLCD
+	CROSS APPLY (
+		SELECT CompanyID from PAYDB.dbo.Company c where c.CompanyCode = DB_NAME()
+	) c
+	OUTER APPLY (
+		Select Duplicate = 1
+		from PAYDB.dbo.CompanyBenefitCodes dpc
+		Where dpc.CompanyID = c.CompanyID and dpc.BenefitCode = BENEFIT
+	) dup 
+	where isnull(Duplicate,0) <> 1;
+
+	
+	INSERT PAYDB.dbo.Employee(EmployeeID, EmployeeName, CompanyID, DOB, HIreDate, LastWorkDay, DataSource, Frequency, Contractor)
+
+
+	Select RTRIM(EMPLOYID), rtrim(FRSTNAME)+' '+RTRIM(lastname), c.CompanyID, e.BRTHDATE, e.STRTDATE, e.LASTDAYWORKED_I, 0, Frequency, Contractor = case when e.EMPLOYMENTTYPE = 1 then 0 else 1 end
+	from UPR00100 e
+	outer apply (
+		select top(1) Frequency = CASE p.PAYPEROD when 1 then 'W'
+			when 2 then 'BW'
+			when 3 then 'SM'
+			when 4 then 'M'
+			when 5 then 'Q'
+			else 'M' end 
+		from UPR00400 p
+		where p.EMPLOYID = e.EMPLOYID
+		and PAYPEROD <= 4
+		order by INACTIVE ASC, DEX_ROW_ID DESC
+
+	) f
+	outer apply PAYDB.dbo.Company c
+	where c.CompanyCode = DB_NAME()
+	--and e.EMPLOYID IN (Select distinct EMPLOYID from UPR30100 where CHEKDATE >= DATEADD(YY,-1,getdate()))
+	and e.EMPLOYID NOT IN (Select EmployeeId from PAYDB.dbo.Employee where CompanyId = c.CompanyId)
+	ORDER BY e.EMPLOYID;
+
+	
+
+END 
+
+
+
+
+GO
+
+
+
+CREATE PROC [dbo].[blue_getPayrunChangeSummary]
+	@Payrun1 varchar(30) ,
+	@Payrun2 varchar(30) 
+AS
+begin
+	
+		   
+	select EMPLOYID, e.DEPRTMNT, e.DepartmentName, e.EmployeeName,  PYRLRTYP,PayrollCode,
+		Amount1=SUM(Pay1),
+		Amount2=SUM(Pay2 ),
+		PayDiff = SUM(Pay2 - Pay1 )
+	from [blue_EmployeePayrollHistory] h
+	outer apply (
+		Select Pay1=case when AuditCtrlCode = @Payrun1 then TOTALPAY else 0 end ,
+				Pay2=case when AuditCtrlCode = @Payrun2 then TOTALPAY else 0 end 
+	) amounts
+	outer apply (
+		select EmployeeName = RTRIM(e.LASTNAME)+', '+RTRIM(e.FRSTNAME)+' '+RTRIM(e.MIDLNAME),
+			e.DEPRTMNT, DepartmentName = RTRIM(d.DSCRIPTN)
+		from UPR00100 e 
+		inner join UPR40300 d on e.DEPRTMNT = d.DEPRTMNT
+		where e.EMPLOYID = h.EMPLOYID
+	) e
+	--inner join UPR00100 e on h.EMPLOYID = e.EMPLOYID
+	where AuditCtrlCode in (@Payrun1,  @Payrun2)
+	group by EMPLOYID, e.DEPRTMNT, e.DepartmentName, e.EmployeeName, PYRLRTYP, PayrollCode
+end
+
+
+
+
+
+GO
+
+
+
+-- =============================================
+-- Author:		E. Greaves
+-- Create date: 2017-05-17
+-- Description:	
+-- Update : 2017-07-13
+-- =============================================
+CREATE PROCEDURE [dbo].[blue_getCurrentTaxDetailsEE] 
+	-- Add the parameters for the stored procedure here
+
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+ 	
+	
+	SELECT e.*,t.*, TTLLCLTX=0
+	FROM UPR10202 lt
+	INNER JOIN UPR10200 b on lt.USERID = b.USERID
+	INNER JOIN UPR00100 e on lt.EMPLOYID = e.EMPLOYID
+	INNER JOIN blue_EmployeePayrollTaxTrueUp t ON t.EmployeeID = lt.EMPLOYID 
+
+
+END
+
+
+
+GO
+
+
+
+-- =============================================
+-- Author:		E. Greaves
+-- Create date: 2017-05-17
+-- Description:	
+-- Update : 2017-07-13
+-- =============================================
+CREATE PROCEDURE [dbo].[blue_getCurrentTaxDetails] 
+	-- Add the parameters for the stored procedure here
+
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+ 	
+	
+	SELECT e.*,t.*, TTLLCLTX=0
+	FROM UPR10202 lt
+	INNER JOIN UPR10200 b on lt.USERID = b.USERID
+	INNER JOIN UPR00100 e on lt.EMPLOYID = e.EMPLOYID
+	INNER JOIN blue_EmployeePayrollTaxTrueUp t ON t.EmployeeID = lt.EMPLOYID and Paid=0
+
+
+END
+
+
+
+GO
+
+
+-- ================================    
+-- Author:  E. Greaves - Bluestone    
+-- Create date: April 16, 2017    
+-- Description: Get Company Info    
+-- ================================
+CREATE PROCEDURE [dbo].[blue_getCompanyInfo]    
+AS    
+BEGIN    
+	select InterId, CompanyName = RTRIM(CMPNYNAM)
+	from DYNAMICS.dbo.SY01500
+	Where InterId = db_name()
+    
+END 
+
+
+
+
+GO
+
+
+
+
+
+-- =============================================
+-- Author:		Earlgarth Greaves
+-- Create date: 2017-06-26
+-- Description:	reset payroll tax based
+-- Updated: 2017-08-07 
+-- Updated: 2018-05-04
+-- =============================================
+CREATE PROCEDURE [dbo].[blue_CalculatePayrollTax] 
+	-- Add the parameters for the stored procedure here
+	@UserId varchar(15) = 0
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+	DECLARE @PTax table(CompanyID int, EmployeeID varchar(15) not null, EETax numeric(9,2) null, ERTaxWOB numeric(9,2) null, ERTax numeric(9,2) null, CalcSequence smallint null);
+	DECLARE @OldPTax table(CompanyID int, EmployeeID varchar(15) not null, TaxCode varchar(8) not null,  OldTax numeric(9,2) not null, TaxTable varchar(8) not null );
+	DECLARE @GLEntry table(EmployeeID  varchar(15) not null, DEPRTMNT  varchar(8) not null, JOBTITLE  varchar(8) not null, ACTINDX int not null, Amount numeric(9,2) not null, CD varchar(3) not null, Change numeric(9,2) null);
+
+	---- DEBUG ---
+	INSERT UPR10209_audit(PRCount, USERID, EMPLOYID, PYRNTYPE, PYRLRTYP, TRXNUMBER, SEQNUMBR, ACTINDX, AMNTOPST, CHEKNMBR, POSTEDDT, DEPRTMNT, JOBTITLE, PAYROLCD, UPRACTYP, PYADNMBR, DEX_ROW_ID, Stage)
+
+	SELECT ISNULL(PRCount,0)+1,USERID, EMPLOYID, PYRNTYPE, PYRLRTYP, TRXNUMBER, SEQNUMBR, ACTINDX, AMNTOPST, CHEKNMBR, POSTEDDT, DEPRTMNT, JOBTITLE, PAYROLCD, UPRACTYP, PYADNMBR, DEX_ROW_ID,'A'
+	FROM            UPR10209
+	OUTER APPLY ( SELECT PRCount = MAX(PRCount) FROM UPR10209_audit) c
+	--- DEBUG ---
+
+
+	/*
+	******************************************
+	 Calculate Employee Tax
+	******************************************
+	*/
+
+	INSERT @PTax(CompanyID, EmployeeID, EETax, ERTaxWOB, ERTax, CalcSequence)
+	Select e.CompanyID, EMPLOYID, round(t.TrueUp,2), round(t.ERTaxWOB,2), round(t.ERTax,2), t.CalcSequence
+	FROM UPR10202 ee
+	INNER JOIN UPR10200 b on ee.USERID = b.USERID
+	INNER JOIN PAYDB.dbo.Company c on c.CompanyCode = DB_NAME()
+	INNER JOIN PAYDB.dbo.Employee e on e.EmployeeID = ee.EMPLOYID and e.CompanyID = c.CompanyID
+	INNER JOIN blue_EmployeePayrollTaxTrueUp t on t.EmployeeID = ee.EMPLOYID and t.Paid = 0
+	where ee.USERID = @UserId
+	and c.Active = 1;
+
+
+	/*
+	******************************************
+	 Get a copy of Old Tax Values -- LOCAL TAX
+	******************************************
+	*/
+
+	INSERT @OldPTax (CompanyID , EmployeeID , TaxCode,  OldTax , TaxTable )
+
+	SELECT t.CompanyID, t.EmployeeID, lt.LOCALTAX, lt.TTLLCLTX,'UPR10207'
+	FROM UPR10207 lt
+	INNER JOIN UPR10200 b on lt.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = lt.EMPLOYID 
+	INNER JOIN PAYDB.dbo.CompanyDeductionCodes dc on dc.DeductionCode = lt.LOCALTAX and dc.CompanyId = t.CompanyID 
+	LEFT OUTER JOIN PAYDB.dbo.BenefitSpecialType dst on dst.BenefitSpecialTypeCode = dc.SpecialType 
+	WHERE ISNULL(dst.CalcSquence,0) = t.CalcSequence	
+	and dst.EETaxCode = 1		
+	and lt.USERID = @UserId;
+
+	/*
+	******************************************
+	 Update employee ptax local tax if used
+	******************************************
+	*/
+
+    Update UPR10207
+
+	SET TTLLCLTX = round(EETax*ISNULL(dst.EETaxRatio,0)/100.00,2)
+
+	--select round(EETax*ISNULL(dst.EETaxRatio,0)/100.00,2),* -- DEBUG --
+
+	FROM UPR10207 lt
+	INNER JOIN UPR10200 b on lt.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = lt.EMPLOYID 
+	INNER JOIN PAYDB.dbo.CompanyDeductionCodes dc on dc.DeductionCode = lt.LOCALTAX and dc.CompanyId = t.CompanyID 
+	LEFT OUTER JOIN PAYDB.dbo.BenefitSpecialType dst on dst.BenefitSpecialTypeCode = dc.SpecialType 
+	WHERE ISNULL(dst.CalcSquence,0) = t.CalcSequence	
+	and dst.EETaxCode = 1		
+	and lt.USERID = @UserId;
+
+
+	/*
+	******************************************
+	 Get a copy of Old Tax Values - Deductions
+	******************************************
+	*/
+
+	INSERT @OldPTax (CompanyID , EmployeeID , TaxCode,  OldTax, TaxTable )
+
+	SELECT t.CompanyID, t.EmployeeID, d.DEDUCTON, d.TTLDEDTN, 'UPR10204'
+	FROM UPR10204 d
+	INNER JOIN UPR10200 b on d.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = d.EMPLOYID 
+	INNER JOIN UPR00500 dd on dd.EMPLOYID = d.EMPLOYID and dd.DEDUCTON = d.DEDUCTON  and dd.VARDEDTN = 0 and dd.DEDNMTHD = 1 -- ignore if transaction required or fixed amount specified
+	INNER JOIN PAYDB.dbo.CompanyDeductionCodes dc on dc.DeductionCode = d.DEDUCTON and dc.CompanyId = t.CompanyID
+	LEFT OUTER JOIN PAYDB.dbo.BenefitSpecialType dst on dst.BenefitSpecialTypeCode = dc.SpecialType 
+	WHERE ISNULL(dst.CalcSquence,0) = t.CalcSequence	
+	and dst.EETaxCode = 1		
+	and d.USERID = @UserId;
+
+	/*
+	******************************************
+	 Update employee ptax deductions if used
+	******************************************
+	*/
+
+    Update UPR10204
+	
+	SET TTLDEDTN = round(EETax*dst.EETaxRatio/100.00,2)
+
+	--select round(EETax*dst.EETaxRatio/100.00,2),* -- DEBUG --
+	FROM UPR10204 d
+	INNER JOIN UPR10200 b on d.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = d.EMPLOYID 
+	INNER JOIN UPR00500 dd on dd.EMPLOYID = d.EMPLOYID and dd.DEDUCTON = d.DEDUCTON  and dd.VARDEDTN = 0 and dd.DEDNMTHD = 1 -- ignore if transaction required or fixed amount specified
+	INNER JOIN PAYDB.dbo.CompanyDeductionCodes dc on dc.DeductionCode = d.DEDUCTON and dc.CompanyId = t.CompanyID
+	LEFT OUTER JOIN PAYDB.dbo.BenefitSpecialType dst on dst.BenefitSpecialTypeCode = dc.SpecialType 
+	WHERE ISNULL(dst.CalcSquence,0) = t.CalcSequence	
+	and dst.EETaxCode = 1		
+	and d.USERID = @UserId;
+			
+	/*
+	******************************************
+	 Get a copy of Old Tax Values - Benefits
+	******************************************
+	*/
+
+	INSERT @OldPTax (CompanyID , EmployeeID , TaxCode, OldTax, TaxTable )
+
+	SELECT t.CompanyID, t.EmployeeID, eb.BENEFIT, eb.TOTLBNFT,'UPR10205'
+	FROM UPR10205 eb
+	INNER JOIN UPR10200 b on eb.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = eb.EMPLOYID 
+	INNER JOIN UPR00600 bb on bb.EMPLOYID = eb.EMPLOYID and bb.BENEFIT = eb.BENEFIT and bb.VARBENFT = 0 and bb.BNFTMTHD in (1, 3)
+	INNER JOIN PAYDB.dbo.CompanyBenefitCodes bc on bc.BenefitCode = eb.BENEFIT and bc.CompanyId = t.CompanyID 
+	INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType 
+	WHERE ISNULL(bst.CalcSquence,0) = t.CalcSequence	
+	and (bst.EETaxCode = 1 OR bst.ERTaxCode = 1	)		
+	and eb.USERID = @UserId;
+
+
+
+	/*
+	******************************************
+	 Update employEE ptax benefits if used
+	******************************************
+	*/   
+
+	Update UPR10205
+	
+	SET TOTLBNFT = round(EETax*bst.EETaxRatio/100.00,2)
+	
+	--SELECT round(EETax*bst.EETaxRatio/100.00,2),* -- DEBUG --
+	FROM UPR10205 eb
+	INNER JOIN UPR10200 b on eb.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = eb.EMPLOYID 
+	INNER JOIN UPR00600 bb on bb.EMPLOYID = eb.EMPLOYID and bb.BENEFIT = eb.BENEFIT and bb.VARBENFT = 0 and bb.BNFTMTHD in (1, 3)
+	INNER JOIN PAYDB.dbo.CompanyBenefitCodes bc on bc.BenefitCode = eb.BENEFIT and bc.CompanyId = t.CompanyID 
+	INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType 
+	WHERE ISNULL(bst.CalcSquence,0) = t.CalcSequence	
+	and bst.EETaxCode = 1			
+	and eb.USERID = @UserId;
+
+
+	/*
+	******************************************
+	 Update employER ptax benefits if used
+	******************************************
+	*/   
+
+	Update UPR10205
+	
+	SET TOTLBNFT = round(ERTax,2)
+	
+	--SELECT round(ERTax,2),* -- DEBUG --
+	FROM UPR10205 eb
+	INNER JOIN UPR10200 b on eb.USERID = b.USERID
+	INNER JOIN @PTax t on t.EmployeeID = eb.EMPLOYID 
+	INNER JOIN UPR00600 bb on bb.EMPLOYID = eb.EMPLOYID and bb.BENEFIT = eb.BENEFIT and bb.VARBENFT = 0 and bb.BNFTMTHD in (1, 3)
+	INNER JOIN PAYDB.dbo.CompanyBenefitCodes bc on bc.BenefitCode = eb.BENEFIT and bc.CompanyId = t.CompanyID 
+	INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType 
+	WHERE ISNULL(bst.CalcSquence,0) = t.CalcSequence	
+	and bst.ERTaxCode = 1	
+	and t.ERTaxWOB <> t.ERTax		
+	and eb.USERID = @UserId;
+
+
+	/*
+	******************************************
+	 Update employee gross pay and net pay
+	******************************************
+	*/   
+
+	UPDATE UPR10202
+	set NTWPYRN = ISNULL(TotalPay,0) - ISNULL(TotalDeduct,0) - ISNULL(TotalLocalTax,0), 
+		GRWGPRN = ISNULL(TotalPay,0)
+	From UPR10202 nw
+	outer apply (
+		Select TotalPay = SUM(p.TOTALPAY)
+		from UPR10203 p 
+		where EMPLOYID = nw.EMPLOYID
+	) pc
+	outer apply (
+		Select TotalDeduct = SUM(d.TTLDEDTN)
+		from UPR10204 d
+		where EMPLOYID = nw.EMPLOYID
+
+	) d
+	outer apply (
+		Select TotalLocalTax = SUM(TTLLCLTX)
+		from UPR10207 lt
+		where EMPLOYID = nw.EMPLOYID
+	) l
+	INNER JOIN @PTax t on nw.EMPLOYID = t.EmployeeID
+
+	WHERE nw.USERID = @UserId;
+
+
+	/* UPDATE PAYROLL TAX Payable JOURNAL ENTRY */
+	/* assume dedicated account for payroll tax entry */
+
+
+	WITH GLEntry(EmployeeID, DEPRTMNT, JOBTITLE, ACTINDX, Amount, CD, Change)
+	As (
+		Select ee.EMPLOYID, 
+			'ALL',--split.DEPRTMNT,
+			'ALL',--split.JOBTITLE,
+			pa.ACTINDX, 
+			Amount = Sum(Amount), CD, Change = SUM(Change)
+		from (
+			select EMPLOYID, DEPRTMNT, JOBTITLE, SplitRatio =sum(d.TOTALPAY)/Gross
+			from UPR10203 d
+			cross apply (
+				select Gross = Sum(s.TOTALPAY)
+				from UPR10203 s
+				where s.EMPLOYID = d.EMPLOYID
+				group by EMPLOYID
+				having SUM(s.totalpay) > 0
+			) g
+			group by EMPLOYID, DEPRTMNT, JOBTITLE, g.Gross
+		) ee
+	
+		cross apply (
+			
+			-- (CR) --
+			
+			-- LOCAL TAX --
+			select PayrollCode=LOCALTAX, Amount= -TTLLCLTX * ee.SplitRatio , PayrollType = 4, CD = 'CR', Change = -(TTLLCLTX - ot.OldTax) * ee.SplitRatio
+			from UPR10207 lt
+			INNER JOIN @PTax t on t.EmployeeID = lt.EMPLOYID 
+			INNER JOIN PAYDB.dbo.CompanyDeductionCodes dc on dc.DeductionCode = lt.LOCALTAX and dc.CompanyId = t.CompanyID 
+			INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = dc.SpecialType 
+			INNER JOIN @OldPTax ot on ot.EmployeeID = lt.EMPLOYID and ot.TaxCode = lt.LOCALTAX and ot.TaxTable = 'UPR10207'
+
+			where ee.EMPLOYID = lt.EMPLOYID 
+			and bst.EETaxCode = 1	
+			and lt.USERID = @UserId
+
+			UNION ALL 
+
+			-- DEDUCTION --
+			select PayrollCode=DEDUCTON,Amount=-TTLDEDTN * ee.SplitRatio  , PayrollType = 5, CD = 'CR', Change = -(TTLDEDTN - ot.OldTax) * ee.SplitRatio
+			from UPR10204 d
+			INNER JOIN @PTax t on t.EmployeeID = d.EMPLOYID 
+			INNER JOIN PAYDB.dbo.CompanyDeductionCodes dc on dc.DeductionCode = d.DEDUCTON and dc.CompanyId = t.CompanyID
+			INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = dc.SpecialType 
+			INNER JOIN @OldPTax ot on ot.EmployeeID = d.EMPLOYID and ot.TaxCode = d.DEDUCTON and ot.TaxTable = 'UPR10204'
+			
+			where ee.EMPLOYID = d.EMPLOYID 
+			and bst.EETaxCode = 1
+			and d.USERID = @UserId
+
+			UNION ALL 
+
+			-- BENEFIT PAYABLE --
+			select PayrollCode=BENEFIT,Amount=-TOTLBNFT * ee.SplitRatio  , PayrollType = 8, CD = 'CR', Change = -(TOTLBNFT - ot.OldTax) * ee.SplitRatio 
+			from UPR10205 b
+			INNER JOIN @PTax t on t.EmployeeID = b.EMPLOYID 
+			INNER JOIN PAYDB.dbo.CompanyBenefitCodes bc on bc.BenefitCode = b.BENEFIT and bc.CompanyId = t.CompanyID 
+			INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType 
+			INNER JOIN @OldPTax ot on ot.EmployeeID = b.EMPLOYID and ot.TaxCode = b.BENEFIT and ot.TaxTable = 'UPR10205'
+
+			
+			where ee.EMPLOYID = b.EMPLOYID 
+			and (bst.ERTaxCode = 1 OR bst.EETaxCode = 1) 
+			and b.USERID  = @UserId
+
+
+			UNION ALL
+
+			-- (DR) --
+
+			-- BENEFIT EXPENSE --
+			select PayrollCode=BENEFIT,Amount=TOTLBNFT * ee.SplitRatio  , PayrollType = 7, CD='DR', Change = (TOTLBNFT - ot.OldTax) * ee.SplitRatio
+			from UPR10205 b
+			INNER JOIN @PTax t on t.EmployeeID = b.EMPLOYID 
+			INNER JOIN PAYDB.dbo.CompanyBenefitCodes bc on bc.BenefitCode = b.BENEFIT and bc.CompanyId = t.CompanyID 
+			INNER JOIN PAYDB.dbo.BenefitSpecialType bst on bst.BenefitSpecialTypeCode = bc.SpecialType 
+			INNER JOIN @OldPTax ot on ot.EmployeeID = b.EMPLOYID and ot.TaxCode = b.BENEFIT and ot.TaxTable = 'UPR10205'
+			where ee.EMPLOYID = b.EMPLOYID 
+			and (bst.ERTaxCode = 1 OR bst.EETaxCode = 1) 
+			and b.USERID  = @UserId
+
+		) lt
+
+		outer apply (
+			select TOP (1)  pa.DEPRTMNT, pa.JOBTITLE, pa.PAYROLCD, pa.ACTINDX 
+			from UPR40500 pa
+			cross apply (
+				Select Match = case when (pa.DEPRTMNT =  ee.DEPRTMNT and  pa.JOBTITLE = ee.JOBTITLE and  pa.PAYROLCD = lt.PayrollCode) then 1
+					when (pa.DEPRTMNT =  ee.DEPRTMNT and  pa.JOBTITLE = ee.JOBTITLE and pa.PAYROLCD = 'ALL' ) then 2
+					when (pa.DEPRTMNT =  ee.DEPRTMNT and  pa.JOBTITLE = 'ALL' and pa.PAYROLCD = lt.PayrollCode ) then 3
+					when (pa.DEPRTMNT =  ee.DEPRTMNT and  pa.JOBTITLE = 'ALL' and pa.PAYROLCD = 'ALL') then 4
+					when (pa.DEPRTMNT =  'ALL' and  pa.JOBTITLE = 'ALL' and pa.PAYROLCD = lt.PayrollCode) then 5
+					when (pa.DEPRTMNT = 'ALL' and  pa.JOBTITLE = 'ALL' and pa.PAYROLCD = 'ALL') then 6
+					else 0 end
+			) m
+			where UPRACTYP = lt.PayrollType
+			and Match > 0
+			order by Match ASC
+		
+		) pa
+		outer apply (
+
+			Select  -- replace 'ALL' with employee defaults
+					DEPRTMNT=case when pa.DEPRTMNT='ALL' then e.DEPRTMNT else pa.DEPRTMNT end, 
+					JOBTITLE=case when pa.JOBTITLE='ALL' then e.JOBTITLE else pa.JOBTITLE end	
+			from UPR00100 e
+			where e.EMPLOYID = ee.EMPLOYID
+		
+		) split
+		group by ee.EMPLOYID, pa.ACTINDX, CD-- split.DEPRTMNT, split.JOBTITLE, pa.DEPRTMNT, pa.JOBTITLE
+	)
+
+	INSERT @GLEntry
+	Select * from GLEntry;
+
+	-- DEBUG : Record the GL Entry generated --
+	INSERT UPR10209_GLEntry(PRCount, EmployeeID, DEPRTMNT, JOBTITLE, ACTINDX, Amount, CD, Change)
+	SELECT ISNULL(PRCount,0), EmployeeID, DEPRTMNT, JOBTITLE, ACTINDX, Amount, CD, Change 
+	from @GLEntry
+	OUTER APPLY ( SELECT PRCount = MAX(PRCount) FROM UPR10209_audit) prc
+	-- DEBUG : Record the GL Entry generated --
+
+
+	Update UPR10209
+	Set AMNTOPST = AMNTOPST + ROUND(Change,2)
+	FROM UPR10209 oje
+	cross apply (
+		select Amount, Change
+		from @GLEntry nje 
+		where nje.EmployeeID = oje.EMPLOYID and nje.ACTINDX = oje.ACTINDX 
+	) nje;
+
+
+
+
+		---- DEBUG ---
+	INSERT UPR10209_audit(PRCount, USERID, EMPLOYID, PYRNTYPE, PYRLRTYP, TRXNUMBER, SEQNUMBR, ACTINDX, AMNTOPST, CHEKNMBR, POSTEDDT, DEPRTMNT, JOBTITLE, PAYROLCD, UPRACTYP, PYADNMBR, DEX_ROW_ID, Stage)
+
+	SELECT ISNULL(PRCount,0), USERID, EMPLOYID, PYRNTYPE, PYRLRTYP, TRXNUMBER, SEQNUMBR, ACTINDX, AMNTOPST, CHEKNMBR, POSTEDDT, DEPRTMNT, JOBTITLE, PAYROLCD, UPRACTYP, PYADNMBR, DEX_ROW_ID,'B'
+	FROM            UPR10209
+	OUTER APPLY ( SELECT PRCount = MAX(PRCount) FROM UPR10209_audit) prc
+	--- DEBUG ---
+
+
+END
+
+
+
+
+
+
+GO
+
+
